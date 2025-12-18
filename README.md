@@ -111,44 +111,189 @@ pulumi preview
 pulumi up
 ```
 
-### 6. Get Outputs
+### 7. Get Outputs
 
 ```bash
 pulumi stack output
 ```
 
-### 7. Configure kubectl
+### 8. Configure kubectl - Option 1: Using AWS CLI (Recommended)
 
-After the cluster is created, configure kubectl:
+After the cluster is created, configure kubectl using the AWS CLI:
 
 ```bash
-aws eks update-kubeconfig --name <cluster_name> --region <region>
+# Set your AWS credentials (if not already configured)
+export AWS_ACCESS_KEY_ID=your-access-key-id
+export AWS_SECRET_ACCESS_KEY=your-secret-access-key
+export AWS_DEFAULT_REGION=us-east-1
+
+# Or configure AWS credentials
+aws configure
+
+# Update kubeconfig
+CLUSTER_NAME=$(pulumi stack output cluster_name)
+REGION=$(pulumi stack output cluster_endpoint | grep -oP 'eks\.\K[^.]+')
+aws eks update-kubeconfig --name $CLUSTER_NAME --region $REGION
+
+# Verify connection
+kubectl get nodes
+kubectl get pods --all-namespaces
 ```
 
-## Resources Created
+### 8. Configure kubectl - Option 2: Using Exported Kubeconfig
 
-### Network
-- VPC with configurable CIDR block
-- 2 Public Subnets (with route to Internet Gateway)
-- 2 Private Subnets (with routes to NAT Gateways)
-- Internet Gateway
-- 2 NAT Gateways with Elastic IPs
-- Route tables for public and private subnets
+If you prefer to use the exported kubeconfig directly:
 
-### Security
-- Security groups for cluster and nodes
-- IAM roles for cluster and nodes
-- IAM policies for EKS and worker nodes
+```bash
+# Export the kubeconfig from Pulumi stack output
+pulumi stack output cluster_kubeconfig > kubeconfig.json
 
-### EKS
-- EKS Cluster
-- Node Group with auto-scaling
+# Use the exported kubeconfig
+export KUBECONFIG=$PWD/kubeconfig.json
 
-### Kubernetes Components (HPA)
-- Metrics Server (for pod metrics collection)
-- Demo Deployment (nginx) with resource requests/limits
-- Demo Service (LoadBalancer)
-- Horizontal Pod Autoscaler (HPA v2 with CPU and Memory metrics)
+# Verify connection
+kubectl get nodes
+kubectl get pods --all-namespaces
+
+# Or use with kubectl directly
+kubectl --kubeconfig=kubeconfig.json get nodes
+```
+
+### 9. Set Up AWS Credentials on Local Machine
+
+#### Option A: AWS CLI Configuration File
+
+```bash
+# Interactive configuration
+aws configure
+
+# Enter your credentials when prompted:
+# AWS Access Key ID: [your-access-key-id]
+# AWS Secret Access Key: [your-secret-access-key]
+# Default region name: us-east-1
+# Default output format: json
+
+# Verify configuration
+aws sts get-caller-identity
+```
+
+#### Option B: Environment Variables
+
+```bash
+# Set credentials as environment variables
+export AWS_ACCESS_KEY_ID=your-access-key-id
+export AWS_SECRET_ACCESS_KEY=your-secret-access-key
+export AWS_DEFAULT_REGION=us-east-1
+
+# Verify credentials
+aws sts get-caller-identity
+
+# Optional: Add to ~/.bashrc or ~/.zshrc for persistence
+echo 'export AWS_ACCESS_KEY_ID=your-access-key-id' >> ~/.bashrc
+echo 'export AWS_SECRET_ACCESS_KEY=your-secret-access-key' >> ~/.bashrc
+echo 'export AWS_DEFAULT_REGION=us-east-1' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Option C: AWS Named Profiles
+
+```bash
+# Create a named profile
+aws configure --profile my-profile
+
+# Use the profile
+export AWS_PROFILE=my-profile
+
+# Verify
+aws sts get-caller-identity
+
+# For kubectl, you may need to specify in kubeconfig or use AWS_PROFILE environment variable
+export AWS_PROFILE=my-profile
+aws eks update-kubeconfig --name <cluster-name> --region <region>
+```
+
+### 10. Verify Cluster Access
+
+```bash
+# Check cluster info
+kubectl cluster-info
+
+# Get cluster nodes
+kubectl get nodes
+
+# Get all resources in all namespaces
+kubectl get all -A
+
+# Check EKS cluster details
+aws eks describe-cluster --name $(pulumi stack output cluster_name)
+
+# Get metrics (if HPA enabled)
+kubectl top nodes
+kubectl top pods -A
+```
+
+## Managing AWS Credentials
+
+### Why AWS Credentials Matter
+
+Both Pulumi (for AWS resource management) and kubectl (for cluster access) need AWS credentials to function. Here's what each component needs:
+
+- **Pulumi**: Requires credentials to provision and manage AWS resources (VPC, EKS, IAM, etc.)
+- **kubectl**: Uses AWS credentials to authenticate with the EKS cluster API
+- **aws CLI**: Uses credentials to interact with AWS services
+
+### Security Best Practices
+
+1. **Never commit credentials to version control**
+2. **Use IAM roles when deploying from EC2 instances or Lambda**
+3. **Rotate access keys regularly**
+4. **Use temporary credentials with session tokens when possible**
+5. **Use AWS SSO for enterprise environments**
+6. **Restrict IAM policies to minimum required permissions**
+
+### Check Current Credentials
+
+```bash
+# View current AWS identity
+aws sts get-caller-identity
+
+# Output should show:
+# {
+#     "UserId": "AIDAJ...",
+#     "Account": "123456789012",
+#     "Arn": "arn:aws:iam::123456789012:user/username"
+# }
+
+# List configured profiles
+aws configure list
+
+# View configured regions and credentials location
+cat ~/.aws/config
+cat ~/.aws/credentials  # Be careful - contains sensitive data
+```
+
+### Troubleshooting Credential Issues
+
+```bash
+# Check if credentials are set
+echo $AWS_ACCESS_KEY_ID
+echo $AWS_SECRET_ACCESS_KEY
+
+# Verify profile is set
+echo $AWS_PROFILE
+
+# Clear cached credentials (if using profiles)
+rm -rf ~/.aws/cli/cache
+
+# Test credentials with a simple AWS command
+aws s3 ls
+
+# If getting "Unable to locate credentials" error:
+# 1. Check if credentials file exists: ls ~/.aws/credentials
+# 2. Check if config file exists: ls ~/.aws/config
+# 3. Check environment variables: printenv | grep AWS
+# 4. Check IAM role (if running on EC2): curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+```
 
 ## Cleanup
 
@@ -184,6 +329,31 @@ pulumi destroy
 - The Metrics Server installation may take a few minutes
 - Check logs: `kubectl logs -n kube-system -l app.kubernetes.io/name=metrics-server`
 - Ensure nodes have sufficient resources for the metrics server pod
+
+## Resources Created
+
+### Network
+- VPC with configurable CIDR block
+- 2 Public Subnets (with route to Internet Gateway)
+- 2 Private Subnets (with routes to NAT Gateways)
+- Internet Gateway
+- 2 NAT Gateways with Elastic IPs
+- Route tables for public and private subnets
+
+### Security
+- Security groups for cluster and nodes
+- IAM roles for cluster and nodes
+- IAM policies for EKS and worker nodes
+
+### EKS
+- EKS Cluster
+- Node Group with auto-scaling
+
+### Kubernetes Components (HPA)
+- Metrics Server (for pod metrics collection)
+- Demo Deployment (nginx) with resource requests/limits
+- Demo Service (LoadBalancer)
+- Horizontal Pod Autoscaler (HPA v2 with CPU and Memory metrics)
 
 ## HPA Usage Examples
 
