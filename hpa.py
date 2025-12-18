@@ -10,10 +10,6 @@ from pulumi_kubernetes.core.v1 import (
     ServiceArgs, ServiceSpecArgs, ServicePortArgs
 )
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs, LabelSelectorArgs
-from pulumi_kubernetes.autoscaling.v2 import (
-    HorizontalPodAutoscalerArgs, HorizontalPodAutoscalerSpecArgs,
-    MetricSpecArgs, ResourceMetricSourceArgs, TargetAverageUtilizationMetricStatusArgs
-)
 
 config = pulumi.Config()
 
@@ -128,7 +124,7 @@ def create_demo_service(provider: k8s.Provider) -> k8s.core.v1.Service:
     return service
 
 
-def create_hpa(deployment: k8s.apps.v1.Deployment, provider: k8s.Provider) -> k8s.autoscaling.v2.HorizontalPodAutoscaler:
+def create_hpa(deployment: k8s.apps.v1.Deployment, provider: k8s.Provider):
     """
     Create Horizontal Pod Autoscaler for the deployment
     """
@@ -141,15 +137,15 @@ def create_hpa(deployment: k8s.apps.v1.Deployment, provider: k8s.Provider) -> k8
             namespace=demo_namespace,
             labels={'app': demo_app_name},
         ),
-        spec=HorizontalPodAutoscalerSpecArgs(
-            scale_target_ref={
+        spec={
+            'scaleTargetRef': {
                 'apiVersion': 'apps/v1',
                 'kind': 'Deployment',
                 'name': deployment.metadata['name'],
             },
-            min_replicas=hpa_min_replicas,
-            max_replicas=hpa_max_replicas,
-            metrics=[
+            'minReplicas': hpa_min_replicas,
+            'maxReplicas': hpa_max_replicas,
+            'metrics': [
                 {
                     'type': 'Resource',
                     'resource': {
@@ -171,7 +167,7 @@ def create_hpa(deployment: k8s.apps.v1.Deployment, provider: k8s.Provider) -> k8
                     }
                 }
             ],
-        ),
+        },
         opts=pulumi.ResourceOptions(
             provider=provider,
             depends_on=[deployment]
