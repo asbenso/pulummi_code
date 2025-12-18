@@ -46,6 +46,18 @@ Edit the configuration in `config.py` to customize:
 - `node_instance_type` - EC2 instance type (default: 't3.medium')
 - `node_role_name` - IAM role name for nodes (default: 'eks-node-role')
 
+### Horizontal Pod Autoscaler (HPA) Configuration
+- `enable_hpa` - Enable HPA setup (default: true)
+- `hpa_min_replicas` - Minimum pod replicas (default: 2)
+- `hpa_max_replicas` - Maximum pod replicas (default: 10)
+- `hpa_cpu_threshold` - CPU utilization threshold % (default: 70)
+- `hpa_memory_threshold` - Memory utilization threshold % (default: 80)
+- `demo_namespace` - Kubernetes namespace for demo app (default: 'default')
+- `demo_app_name` - Demo application name (default: 'demo-app')
+- `demo_app_image` - Docker image for demo app (default: 'nginx:latest')
+- `demo_app_replicas` - Initial replicas for demo app (default: 2)
+- `demo_app_port` - Application port (default: 80)
+
 ### AWS & Tagging
 - `aws_region` - AWS region (default: 'us-east-1')
 - `environment` - Environment tag (default: 'dev')
@@ -78,6 +90,13 @@ pulumi config set vpc_cidr 10.1.0.0/16
 pulumi config set cluster_name my-eks-cluster
 pulumi config set node_instance_type t3.large
 pulumi config set node_desired_count 3
+
+# HPA Configuration
+pulumi config set enable_hpa true
+pulumi config set hpa_min_replicas 2
+pulumi config set hpa_max_replicas 10
+pulumi config set hpa_cpu_threshold 70
+pulumi config set hpa_memory_threshold 80
 ```
 
 ### 4. Preview Changes
@@ -125,6 +144,12 @@ aws eks update-kubeconfig --name <cluster_name> --region <region>
 - EKS Cluster
 - Node Group with auto-scaling
 
+### Kubernetes Components (HPA)
+- Metrics Server (for pod metrics collection)
+- Demo Deployment (nginx) with resource requests/limits
+- Demo Service (LoadBalancer)
+- Horizontal Pod Autoscaler (HPA v2 with CPU and Memory metrics)
+
 ## Cleanup
 
 To destroy all resources:
@@ -147,6 +172,67 @@ pulumi destroy
 ### Kubectl Connection Issues
 - Run `aws eks update-kubeconfig` to update local kubeconfig
 - Verify security groups allow your IP access to the cluster endpoint
+
+### HPA Issues
+- Ensure Metrics Server is running: `kubectl get deployment metrics-server -n kube-system`
+- Check HPA status: `kubectl get hpa -n default`
+- View HPA details: `kubectl describe hpa <hpa-name> -n default`
+- Check pod metrics: `kubectl top pods -n default`
+- Review HPA events: `kubectl describe hpa <hpa-name> -n default | grep -A 10 Events`
+
+### Metrics Server Not Starting
+- The Metrics Server installation may take a few minutes
+- Check logs: `kubectl logs -n kube-system -l app.kubernetes.io/name=metrics-server`
+- Ensure nodes have sufficient resources for the metrics server pod
+
+## HPA Usage Examples
+
+### Monitor HPA Status
+
+```bash
+# Get all HPAs
+kubectl get hpa -n default
+
+# Watch HPA in real-time
+kubectl get hpa -n default -w
+
+# Describe HPA for detailed information
+kubectl describe hpa demo-app-hpa -n default
+```
+
+### View Pod Metrics
+
+```bash
+# Get current CPU/memory usage
+kubectl top pods -n default
+
+# Watch metrics in real-time
+kubectl top pods -n default -l app=demo-app --watch
+```
+
+### Generate Load to Test HPA
+
+```bash
+# Get the LoadBalancer IP
+SERVICE_IP=$(kubectl get svc demo-app-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+# Create a load generator pod
+kubectl run -i --tty load-generator --rm --image=busybox --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://$SERVICE_IP; done"
+
+# In another terminal, watch the HPA scale up
+kubectl get hpa demo-app-hpa -n default -w
+```
+
+### Modify HPA Settings
+
+```bash
+# Edit HPA inline
+kubectl edit hpa demo-app-hpa -n default
+
+# Scale HPA thresholds via Pulumi config
+pulumi config set hpa_cpu_threshold 60
+pulumi up
+```
 
 ## Additional Resources
 

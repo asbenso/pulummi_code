@@ -1,9 +1,10 @@
 """
-Main Pulumi program to set up an AWS EKS cluster with VPC
+Main Pulumi program to set up an AWS EKS cluster with VPC and HPA support
 """
 import pulumi
 import pulumi_aws as aws
 import pulumi_eks as eks
+import pulumi_kubernetes as k8s
 import json
 
 from config import (
@@ -15,6 +16,7 @@ from config import (
     node_max_count, node_instance_type, node_role_name,
     aws_region, common_tags
 )
+from hpa import setup_hpa_infrastructure
 
 # ==================== VPC Setup ====================
 
@@ -306,6 +308,30 @@ node_group = aws.eks.NodeGroup(node_group_name,
     tags={**common_tags, 'Name': node_group_name}
 )
 
+# ==================== Kubernetes Provider Setup ====================
+
+# Get the kubeconfig from the EKS cluster
+kubeconfig = pulumi.Output.concat(
+    '{"apiVersion":"v1","clusters":[{"cluster":{"server":"',
+    eks_cluster.endpoint,
+    '","certificate-authority-data":"',
+    eks_cluster.certificate_authority.data,
+    '"},"name":"kubernetes"}],"contexts":[{"context":{"cluster":"kubernetes","user":"aws"},"name":"aws"}],"current-context":"aws","kind":"Config","preferences":{},"users":[{"name":"aws","user":{"exec":{"apiVersion":"client.authentication.k8s.io/v1beta1","command":"aws","args":["eks","get-token","--cluster-name","',
+    eks_cluster.name,
+    '"]}}}]}'
+)
+
+# Create a Kubernetes provider for the EKS cluster
+k8s_provider = k8s.Provider('k8s-provider',
+    kubeconfig=kubeconfig,
+    opts=pulumi.ResourceOptions(depends_on=[node_group])
+)
+
+# ==================== HPA Setup ====================
+
+# Set up HPA infrastructure (metrics server, demo deployment, and HPA)
+hpa_outputs = setup_hpa_infrastructure(k8s_provider)
+
 # ==================== Outputs ====================
 
 pulumi.export('vpc_id', vpc.id)
@@ -319,3 +345,8 @@ pulumi.export('public_subnet_1_id', public_subnet_1.id)
 pulumi.export('public_subnet_2_id', public_subnet_2.id)
 pulumi.export('private_subnet_1_id', private_subnet_1.id)
 pulumi.export('private_subnet_2_id', private_subnet_2.id)
+
+# Export HPA outputs
+if hpa_outputs:
+    for key, value in hpa_outputs.items():
+        pulumi.export(f'hpa_{key}', value)
